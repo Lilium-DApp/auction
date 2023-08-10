@@ -1,6 +1,6 @@
 
 class NewBid():
-    def __init__(self, walletBid, value: float, quantity: int, time_stamp: int) -> None:
+    def __init__(self, walletBid, value: int, quantity: int, time_stamp: int) -> None:
         self.value = value
         self.quantity = quantity
         self.time_stamp = time_stamp
@@ -11,7 +11,7 @@ class NewBid():
         return f"walletBID: {self.walletBid}, value: {self.value}, quantity: {self.quantity}, time_stamp: {self.time_stamp}"
 
 class NewAuction():
-    def __init__(self, wallet, amount: int, minimum_price: float, duration: int) -> None:
+    def __init__(self, wallet, amount: int, minimum_price: int, duration: int) -> None:
         self.amount = amount
         self.minimum_price = minimum_price
         self.duration = duration
@@ -21,26 +21,28 @@ class NewAuction():
 
     def __repr__(self) -> str:
         return f"wallet: {self.wallet}, amount: {self.amount}, prince: {self.minimum_price}, duration: {self.duration}"
+    def update_time(self, time_stamp):
+        self.time_stamp = time_stamp
 
     def bid(self, offer: NewBid) -> None:
 
         if offer.value <= 0 or offer.quantity <= 0:
-            print("Oferta inválida")
+          
             return
         
         self.time_stamp = offer.time_stamp
         self.price_per_unit = offer.price_per_unit
+    
 
         self.status_auction()
         if self.verify_offer():
             self.offers.append(offer)
             self.offers.sort(key=lambda x: x.price_per_unit, reverse=True)
         else:
-            print("Oferta não aceita")
-
+           pass
     def status_auction(self) -> bool:
         self.status = self.time_stamp <= self.duration  
-        self.return_tokens() if self.status == False else None
+        return self.status 
             
     def verify_offer(self):
         return self.price_per_unit >= self.minimum_price
@@ -53,18 +55,19 @@ class NewAuction():
     def current_offer(self):
         return self.offers[0] if self.offers else None
         
+
     def return_tokens(self):
+        winners = []
         for offer in self.offers:
             if self.amount > 0:
                 if self.amount < offer.quantity:
-                    print(f"{offer.walletBid} recebeu {self.amount} tokens")
+                    winners.append([offer.walletBid,self.amount,offer.value])
                     self.amount = 0
                 else:
                     self.amount -= offer.quantity
-                    print(f"{offer.walletBid} recebeu {offer.quantity} tokens")
+                    winners.append([offer.walletBid,offer.quantity,offer.value])
             else:
-                print("Não há mais tokens para serem distribuidos")
-                break
+                return winners
     
    
 
