@@ -60,8 +60,6 @@ def process_deposit_and_generate_voucher(sender, payload, metadata):
             if not AUCTION.status_auction():
                 ROLLUP_CLIENT.send_report({"payload": Convertions.str2hex(f"Must wait before initiating a new auction")})
 
-
-       
         else:
             try:
                 AUCTION = NewAuction(erc20_deposit["depositor"], erc20_deposit["amount"], erc20_deposit["data"][1] , erc20_deposit["data"][0])
