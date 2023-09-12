@@ -42,6 +42,5 @@ yarl==1.9.2
 certifi==2023.7.22
 charset-normalizer==3.2.0
 idna==3.4
-numpy==1.24.3
 requests==2.31.0
 urllib3==2.0.4
