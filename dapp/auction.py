@@ -10,338 +10,212 @@
 # CONDITIONS OF ANY KIND, either express or implied. See the License for the
 # specific language governing permissions and limitations under the License.
 
-from os import environ
-import traceback
-import logging
-import requests
-from time import sleep
-import json
-from eth_abi import encode
-import re
-from eth_abi_ext import decode_packed
-from enum import Enum
 import web3
-
-
-
-class AUCTION_STATE(Enum):
-    HAPPENING = 0
-    NOT_HAPPENING = 1
-
-
-STATE = AUCTION_STATE.NOT_HAPPENING
-
-
-class Bid:
-    def __init__(self, sender, value):
-        self.value = value
-        self.sender = sender
-
-class Auction:
-    def __init__(self, agent, duration, reserve_price_per_token, quantity, timestamp_init, token_address):
-        self.agent = agent
-        self.duration = duration
-        self.reserve_price_per_token = reserve_price_per_token
-        self.quantity = quantity
-        self.timestamp_init = timestamp_init
-        self.token_address = token_address
-        self.bids = []
-
-    def add_bid(self, bid: Bid):
-        if bid.value >= self.reserve_price_per_token * self.quantity:
-            self.bids.append(bid)
-        else:
-            logger.info(f"Bid is less than reserve price")
-            return "Bid is less than reserve price"
-
-    def finish(self, timestamp_finish):
-        if timestamp_finish >= self.timestamp_init + self.duration:
-            if self.bids:
-                max_bid = max(self.bids, key=lambda bid: bid.value)
-                return max_bid, self.token_address, self.quantity, self.bids
-            else:
-                logger.info(f"Time is up and no bids were received")
-                return None, None, None, None
-        else:
-            logger.info(f"Auction has not finished yet")
-            return "Auction has not finished yet"
-
-    def remaining_time(self, timestamp):
-        return self.timestamp_init + self.duration - timestamp
-    
-AUCTION: Auction = None
-
-
-logging.basicConfig(level="INFO")
-logger = logging.getLogger(__name__)
-
-rollup_server = environ["ROLLUP_HTTP_SERVER_URL"]
-logger.info(f"HTTP rollup_server url is {rollup_server}")
+import json
+import math
+import requests
+import traceback
+from os import environ
+from modules import Logger
+from modules import Auction, Bid, AuctionState
+from modules import Inputs as input
+from modules import Notice, Report, Voucher
+from modules import Convertions as convert
 
 NETWORK = environ["NETWORK"]
-logger.info(f"NETWORK is {NETWORK}")
+ROLLUP_SERVER = environ["ROLLUP_HTTP_SERVER_URL"]
+
+LOGGER = Logger(level="INFO", name=__name__).logger
+
+AUCTION: Auction = None
+AUCTION_STATE = AuctionState.NOT_HAPPENING
+NOTICE = Notice(rollup_server=ROLLUP_SERVER)
+REPORT = Report(rollup_server=ROLLUP_SERVER)
+VOUCHER = Voucher(rollup_server=ROLLUP_SERVER)
 
 networks = json.load(open("networks.json"))
 
+ROLLUP_ADDRESS = None
 DAPP_RELAY_ADDRESS = networks[NETWORK]["DAPP_RELAY_ADDRESS"].lower()
 ETHER_PORTAL_ADDRESS = networks[NETWORK]["ETHER_PORTAL_ADDRESS"].lower()
 ERC20_PORTAL_ADDRESS = networks[NETWORK]["ERC20_PORTAL_ADDRESS"].lower()
 ERC721_PORTAL_ADDRESS = networks[NETWORK]["ERC721_PORTAL_ADDRESS"].lower()
 LILIUM_COMPANY_ADDRESS = networks[NETWORK]["LILIUM_COMPANY_ADDRESS"].lower()
 
-
-rollup_address = None
-
-w3 = web3.Web3()
+LOGGER.info(f"HTTP rollup_server url is {ROLLUP_SERVER}, network is {NETWORK} and rollup address is {ROLLUP_ADDRESS}")
+LOGGER.info(f'Lilium company address is {LILIUM_COMPANY_ADDRESS}, EtherPortal address is {ETHER_PORTAL_ADDRESS}, ERC20Portal address is {ERC20_PORTAL_ADDRESS} and ERC721Portal address is {ERC721_PORTAL_ADDRESS}')
 
 
-###
-# Aux Functions 
-
-def str2hex(string):
-    """
-    Encode a string as an hex string
-    """
-    return binary2hex(str2binary(string))
-
-def str2binary(string):
-    """
-    Encode a string as an binary string
-    """
-    return string.encode("utf-8")
-
-def binary2hex(binary):
-    """
-    Encode a binary as an hex string
-    """
-    return "0x" + binary.hex()
-
-def hex2binary(hexstr):
-    """
-    Decodes a hex string into a regular byte string
-    """
-    return bytes.fromhex(hexstr[2:])
-
-def hex2str(hexstr):
-    """
-    Decodes a hex string into a regular string
-    """
-    return hex2binary(hexstr).decode("utf-8")
-
-def send_notice(notice: str) -> None:
-    send_post("notice", notice)
-
-def send_voucher(voucher):
-    send_post("voucher",voucher)
-
-def send_report(report):
-    send_post("report",report)
-
-def send_post(endpoint,json_data):
-    response = requests.post(rollup_server + f"/{endpoint}", json=json_data)
-    logger.info(f"/{endpoint}: Received response status {response.status_code} body {response.content}")
-
-
-###
-# Selector of functions for solidity <contract>.call(<payload>)
-
-# ERC-20 contract function selector to be called during the execution of a voucher,
-#   which corresponds to the first 4 bytes of the Keccak256-encoded result of "transfer(address,uint256)"
-ERC20_TRANSFER_FUNCTION_SELECTOR = hex2binary(w3.keccak(b'transfer(address,uint256)')[:4].hex())
-
-# ERC-721 contract function selector to be called during the execution of a voucher,
-#   which corresponds to the first 4 bytes of the Keccak256-encoded result of "safeTransferFrom(address,address,uint256)"
-ERC721_SAFETRANSFER_FUNCTION_SELECTOR = hex2binary(w3.keccak(b'safeTransferFrom(address,address,uint256)')[:4].hex())
-
-# EtherPortalFacet contract function selector to be called during the execution of a voucher,
-#   which corresponds to the first 4 bytes of the Keccak256-encoded result of "etherWithdrawal(bytes)", as defined at
-#   https://github.com/cartesi/rollups/blob/v0.8.2/onchain/rollups/contracts/interfaces/IEtherPortal.sol
-ETHER_WITHDRAWAL_FUNCTION_SELECTOR = hex2binary(w3.keccak(b'withdrawEther(address,uint256)')[:4].hex())
-
-
-NEW_AUCTION_FUNCTION_SIGNATURE = hex(int.from_bytes(
-    w3.keccak(b'newAuction(uint256,uint256,uint256)')[:4], 'big'))
-NEW_BID_FUNCTION_SIGNATURE = hex(int.from_bytes(
-    w3.keccak(b'newBid(uint256)')[:4], 'big'))
-FINISH_AUCTION_FUNCTION_SIGNATURE = hex(int.from_bytes(
-    w3.keccak(b'finishAuction()')[:4], 'big'))
-
-###
-# Decode Aux Functions 
-
-def decode_erc20_deposit(binary):
-    ret = binary[:1]
-    token_address = binary[1:21]
-    depositor = binary[21:41]
-    amount = int.from_bytes(binary[41:73], "big")
-    function_signature = binary[73:77]
-    data = decode_packed(['address', 'uint256', 'uint256'], binary[77:])
-    erc20_deposit = {
-        "depositor": binary2hex(depositor),
-        "token_address": binary2hex(token_address),
-        "amount": amount,
-        "function_signature": binary2hex(function_signature),
-        "sender": data[0],
-        "duration": data[1],
-        "reserve_price_per_token": data[2]
-    }
-    logger.info(erc20_deposit)
-    return erc20_deposit
-
-def decode_ether_deposit(binary):
-    depositor = binary[:20]
-    amount = int.from_bytes(binary[20:52], "big")
-    function_signature = binary[52:56]
-    data = decode_packed(['address', 'uint256'],binary[56:])
-    ether_deposit = {
-        "depositor": binary2hex(depositor),
-        "amount": amount,
-        "function_signature": binary2hex(function_signature),
-        "sender": data[0],
-        "interested_quantity": data[1]
-    }
-    logger.info(ether_deposit)
-    return ether_deposit
-
-def decode_finish_auction(binary):
-    function_signature = binary[:4]
-    finish_auction = {
-        "function_signature": binary2hex(function_signature),
-    }
-    logger.info(finish_auction)
-    return finish_auction
-
-
-###
-# Create Voucher Aux Functions 
-
-def create_erc20_transfer_voucher(token_address,receiver,amount):
-    # Function to be called in voucher [token_address].transfer([address receiver],[uint256 amount])
-    data = encode(['address', 'uint256'], [receiver,amount])
-    voucher_payload = binary2hex(ERC20_TRANSFER_FUNCTION_SELECTOR + data)
-    voucher = {"destination": token_address, "payload": voucher_payload}
-    return voucher
-
-def create_ether_withdrawal_voucher(receiver,amount):
-    # Function to be called in voucher [rollups_address].etherWithdrawal(bytes) where bytes is ([address receiver],[uint256 amount])
-    data = encode(['address', 'uint256'], [receiver,amount])
-    voucher_payload = binary2hex(ETHER_WITHDRAWAL_FUNCTION_SELECTOR + data)
-    voucher = {"destination": rollup_address, "payload": voucher_payload}
-    return voucher
-
-###
-# 
-def process_new_auction(wallet, duration, reserve_price_per_token, quantity, timestamp_init, token_address):
+def new_auction(token_address, amount: int, function_signature, sender, duration: int, reserve_price_per_token: int, timestamp: int) -> None:
     global AUCTION
-    global STATE
-    if STATE == AUCTION_STATE.HAPPENING:
-        logger.info(f"Auction already happening. Current state: {STATE.name}")
-        return
-    else:
-        AUCTION= Auction(wallet, duration, reserve_price_per_token, quantity, timestamp_init, token_address)
-        STATE = AUCTION_STATE.HAPPENING
-        logger.info(f"New auction started. Current state: AUCTION_{STATE.name}")
+    global AUCTION_STATE
 
+    if any(arg is None for arg in [sender, duration, amount, token_address, reserve_price_per_token, timestamp]):
+        REPORT.send({"payload": convert.str2hex("None of the arguments can be None in new auction")})
+        raise ValueError("None of the arguments can be None")
+    
+    if function_signature != hex(int.from_bytes(web3.Web3().keccak(b'newAuction(uint256,uint256,uint256)')[:4], 'big')):
+        REPORT.send({"payload": convert.str2hex("Function signature is not correct in new auction")})
+        raise ValueError("Function signature is not correct")
+    
+    if AUCTION_STATE == AuctionState.HAPPENING:
+        REPORT.send({"payload": convert.str2hex("There is already an auction happening in new auction")})
+        raise ValueError("There is already an auction happening")
+    
+    if any(arg <= 0 for arg in [duration, amount, reserve_price_per_token]):
+        REPORT.send({"payload": convert.str2hex("Invalid arguments: Duration, amount, and reserve price per token must be greater than 0 in new auction")})
+        raise ValueError("Invalid arguments: Duration, amount, and reserve price per token must be greater than 0")
+    
+    try:
+        AUCTION = Auction(sender=sender, duration=duration, amount=amount, token_address=token_address, reserve_price_per_token=reserve_price_per_token, timestamp=timestamp)
+        AUCTION_STATE = AuctionState.HAPPENING
+        return True
+    except Exception as e:
+        msg = f"Error {e} processing new auction"
+        LOGGER.info(f"{msg}\n{traceback.format_exc()}")
+        REPORT.send({"payload": convert.str2hex(msg)})
+        return False
+    
 
-def process_new_bid(wallet, value):
+def new_bid(amount: int, function_signature, sender, erc20_interested_amount: int):
     global AUCTION
-    global STATE
-    if STATE == AUCTION_STATE.NOT_HAPPENING:
-        logger.info(f"Auction not happening. Current state: {STATE.name}")
-        return
-    else:
-        AUCTION.add_bid(Bid(wallet, value))
-        logger.info(f"New bid added. Current state: AUCTION_{STATE.name}")
+    global AUCTION_STATE
 
-def process_finish_auction(timestamp_finish):
+    if any(arg is None for arg in [amount, sender, erc20_interested_amount]):
+        REPORT.send({"payload": convert.str2hex("None of the arguments can be None in new bid")})
+        raise ValueError("None of the arguments can be None")
+    
+    if function_signature != hex(int.from_bytes(web3.Web3().keccak(b'newBid(uint256)')[:4], 'big')):
+        REPORT.send({"payload": convert.str2hex("Function signature is not correct in new bid")})
+        raise ValueError("Function signature is not correct")
+    
+    if AUCTION_STATE == AuctionState.NOT_HAPPENING:
+        REPORT.send({"payload": convert.str2hex("There is no auction happening in new bid")})
+        raise ValueError("There is no auction happening")
+    
+    if any(arg <= 0 for arg in [amount, erc20_interested_amount]):
+        REPORT.send({"payload": convert.str2hex("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")})
+        raise ValueError("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")
+
+    if amount / erc20_interested_amount < AUCTION.reserve_price_per_token:
+        REPORT.send({"payload": convert.str2hex("Bid is lower than reserve price in new bid")})
+        raise ValueError("Bid is lower than reserve price")
+    
+    try:
+        if AUCTION.add_bid(Bid(amount, sender, erc20_interested_amount)):
+            return True
+    except Exception as e:
+        msg = f"Error {e} processing new bid"
+        LOGGER.info(f"{msg}\n{traceback.format_exc()}")
+        REPORT.send({"payload": convert.str2hex(msg)})
+        return False
+
+def finish_auction(function_signature, timestamp: int):
     global AUCTION
-    global STATE
-    if STATE == AUCTION_STATE.NOT_HAPPENING:
-        logger.info(f"Auction not happening. Current state: {STATE.name}")
-        return
-    else:
-        max_bid, token_address, erc20_value, bids = AUCTION.finish(timestamp_finish)
-        if max_bid:
-            voucher_bidder = create_erc20_transfer_voucher(token_address, max_bid.sender, erc20_value)
-            voucher_seller = create_ether_withdrawal_voucher(AUCTION.agent, max_bid.value)
-            vouchers = [voucher_bidder, voucher_seller]
-            for loser in bids:
-                if loser!= max_bid:
-                    voucher_loser = create_ether_withdrawal_voucher(loser.sender, loser.value)
-                    vouchers.append(voucher_loser)
-                    logger.info(f'The loser {loser.sender} was refunded with {loser.value}')
-            print(vouchers)
-            return vouchers
+    global AUCTION_STATE
 
-        elif not bids:
-            voucher = []
-            logger.info(f'No bids received')
-            voucher_withdrawal = create_erc20_transfer_voucher(token_address, AUCTION.agent, erc20_value)
-            voucher.append(voucher_withdrawal)
-            return voucher
-        STATE = AUCTION_STATE.NOT_HAPPENING
-        logger.info(f"Auction finished. Current state: AUCTION_{STATE.name}")
-
-
-###
-# handlers
-
-def handle_advance(data):
-    global rollup_address
-    logger.info(f"Received advance request data {data}. Current rollup_address: {rollup_address}")
+    if any(arg is None for arg in [function_signature, timestamp]):
+        REPORT.send({"payload": convert.str2hex("None of the arguments can be None in finish auction")})
+        raise ValueError("None of the arguments can be None")
+    
+    if function_signature != hex(int.from_bytes(web3.Web3().keccak(b'finishAuction()')[:4], 'big')):
+        REPORT.send({"payload": convert.str2hex("Function signature is not correct in finish auction")})
+        raise ValueError("Function signature is not correct")
+    
+    if AUCTION_STATE == AuctionState.NOT_HAPPENING:
+        REPORT.send({"payload": convert.str2hex("There is no auction happening in finish auction")})
+        raise ValueError("There is no auction happening")
+    
+    if AUCTION.remaining_time(timestamp) > 0:
+        REPORT.send({"payload": convert.str2hex("Auction is not finished in finish auction")})
+        raise ValueError("Auction is not finished")
     
     try:
         vouchers = []
+        selected_bids, unselected_bids, total_ether, token_address, total_amount, sender = AUCTION.finish(timestamp=timestamp)
+
+        if any(arg is None for arg in [selected_bids, unselected_bids, total_ether, token_address, total_amount, ]):
+            REPORT.send({"payload": convert.str2hex("None of the arguments can be None in finish auction")})
+            raise ValueError("None of the arguments can be None")
+        
+        for selected_bid, unselected_bid in zip(selected_bids, unselected_bids):
+            total_amount -= math.floor(selected_bid.erc20_interested_amount)
+            voucher_selected = VOUCHER.create_erc20_transfer_voucher(selected_bid.sender, math.floor(selected_bid.erc20_interested_amount), token_address)
+            voucher_unselected = VOUCHER.create_ether_voucher(unselected_bid.sender, math.floor(unselected_bid.ether_amount), ROLLUP_ADDRESS)
+            vouchers.append(voucher_selected, voucher_unselected)
+            
+        vouchers.append(VOUCHER.create_erc20_transfer_voucher(sender, total_amount, token_address))
+        vouchers.append(VOUCHER.create_ether_voucher(sender, total_ether, ROLLUP_ADDRESS))
+
+        AUCTION_STATE = AuctionState.NOT_HAPPENING
+
+        return vouchers
+    
+    except Exception as e:
+        msg = f"Error {e} processing finish auction"
+        LOGGER.info(f"{msg}\n{traceback.format_exc()}")
+        REPORT.send({"payload": convert.str2hex(msg)})
+        return None, None, None
+
+def handle_advance(data):
+
+    LOGGER.info(f"Received advance request data {data}")
+    try:
+        vouchers = []
         payload = data["payload"]
-        binary = hex2binary(payload)
+        unknown_deposit_withdrawal = None
+        binary = convert.hex2binary(payload)
         sender = data["metadata"]["msg_sender"]
         timestamp = data["metadata"]["timestamp"]
 
-        # # Check whether an input was sent by the relay
         if data['metadata']['msg_sender'] == DAPP_RELAY_ADDRESS:
-            rollup_address = payload
-            logger.info(f"Set rollup_address {rollup_address}")
-            send_report({"payload": str2hex(f"Set rollup_address {rollup_address}")})
+            ROLLUP_ADDRESS = payload
+            LOGGER.info(f"Set rollup_address {ROLLUP_ADDRESS}")
+            NOTICE.send({"payload": convert.str2hex(f"Set rollup_address {ROLLUP_ADDRESS}")})
 
         elif data["metadata"]["msg_sender"] == ETHER_PORTAL_ADDRESS:
-            decoded_data = decode_ether_deposit(binary)
-            if decoded_data["function_signature"] == NEW_BID_FUNCTION_SIGNATURE:
-                process_new_bid(decoded_data["sender"], decoded_data["amount"])
-                logger.info(f'New bid received from {decoded_data["sender"]} with value {decoded_data["amount"]}')
-                send_report({"payload": str2hex(f'New bid received from {decoded_data["sender"]} with value {decoded_data["amount"]}')})
+            decoded_data = input.decode_ether_deposit(binary)
+            if new_bid(amount=decoded_data["amount"], function_signature=decoded_data["function_signature"], sender=decoded_data["sender"], erc20_interested_amount=decoded_data["erc20_interested_amount"]):
+                NOTICE.send({"payload": convert.str2hex(f"New bid from {decoded_data['sender']}")})
 
         elif data["metadata"]["msg_sender"] == ERC20_PORTAL_ADDRESS:
-            decoded_data = decode_erc20_deposit(binary)
-            if decoded_data["function_signature"] == NEW_AUCTION_FUNCTION_SIGNATURE:
-                process_new_auction(decoded_data["sender"], decoded_data["duration"], decoded_data["reserve_price_per_token"], decoded_data["amount"], timestamp, decoded_data["token_address"])
-                logger.info(f'New auction received from {decoded_data["sender"]} with duration {decoded_data["duration"]}, reserve_price_per_token {decoded_data["reserve_price_per_token"]} and quantity {decoded_data["amount"]}')
-                send_report({"payload": str2hex(f'New auction received from {decoded_data["sender"]} with duration {decoded_data["duration"]}, reserve_price_per_token {decoded_data["reserve_price_per_token"]} and quantity {decoded_data["amount"]}')})
+            decoded_data = input.decode_erc20_deposit(binary)
+            if new_auction(token_address=decoded_data["token_address"], amount=decoded_data["amount"], function_signature=decoded_data["function_signature"], sender=decoded_data["sender"], duration=decoded_data["duration"], reserve_price_per_token=decoded_data["reserve_price_per_token"], timestamp=timestamp):
+                NOTICE.send({"payload": convert.str2hex(f"New auction from {decoded_data['sender']}")})
         
         elif data["metadata"]["msg_sender"] == LILIUM_COMPANY_ADDRESS:
-            decoded_data = decode_finish_auction(binary)
-            if decoded_data["function_signature"] == FINISH_AUCTION_FUNCTION_SIGNATURE:
-                vouchers = process_finish_auction(timestamp)
+            decoded_data = input.decode_finish_auction(binary)
+            vouchers = finish_auction(decoded_data["function_signature"], timestamp)
+            NOTICE.send({"payload": convert.str2hex(f"Finish auction")})
+                
         else:
-            logger.info(
-                f"Sender {sender} is unknown")
+            decoded_data = input.decode_ether_deposit(binary)
+            unknown_deposit_withdrawal = VOUCHER.create_ether_voucher(decoded_data["sender"], decoded_data["amount"])
+            LOGGER.info(f"Sender {sender} is unknown, creating voucher to withdraw {decoded_data['amount']} wei to {decoded_data['sender']}")
+            
         if vouchers:
             for voucher in vouchers:
-                send_voucher(voucher)
+                VOUCHER.send(voucher)
+                
+        elif unknown_deposit_withdrawal:
+            VOUCHER.send(unknown_deposit_withdrawal)
+            LOGGER.info(f"Created voucher to withdraw unknown sender to {decoded_data['sender']}")
         return "accept"
 
     except Exception as e:
         msg = f"Error {e} processing data {data}"
-        logger.error(f"{msg}\n{traceback.format_exc()}")
-        send_report({"payload": str2hex(msg)})
+        LOGGER.error(f"{msg}\n{traceback.format_exc()}")
+        REPORT.send({"payload": convert.str2hex(msg)})
         return "reject"
 
 def handle_inspect(data):
-    global STATE
-    logger.info(f"Received inspect request data {data}")
-    data_decoded = hex2binary(data["payload"]).decode('utf-8')
+    global AUCTION_STATE
+
+    LOGGER.info(f"Received inspect request data {data}")
+    data_decoded = convert.hex2binary(data["payload"]).decode('utf-8')
     try:
         if data_decoded == "status":
-            send_report({"payload": str2hex(STATE.name)})
+            VOUCHER.send({"payload": convert.str2hex(AUCTION_STATE.name)})
             return "accept"
         else:
             raise Exception(
@@ -349,27 +223,23 @@ def handle_inspect(data):
 
     except Exception as e:
         msg = f"Error {e} processing data {data}"
-        logger.error(f"{msg}\n{traceback.format_exc()}")
-        send_report({"payload": str2hex(msg)})
+        LOGGER.error(f"{msg}\n{traceback.format_exc()}")
+        REPORT.send({"payload": convert.str2hex(msg)})
         return "reject"
-
 
 handlers = {
     "advance_state": handle_advance,
     "inspect_state": handle_inspect,
 }
 
-###
-# Main Loop
-
 finish = {"status": "accept"}
 
 while True:
-    logger.info("Sending finish")
-    response = requests.post(rollup_server + "/finish", json=finish)
-    logger.info(f"Received finish status {response.status_code}")
+    LOGGER.info("Sending finish")
+    response = requests.post(ROLLUP_SERVER + "/finish", json=finish)
+    LOGGER.info(f"Received finish status {response.status_code}")
     if response.status_code == 202:
-        logger.info("No pending rollup request, trying again")
+        LOGGER.info("No pending rollup request, trying again")
     else:
         rollup_request = response.json()
         data = rollup_request["data"]
