@@ -12,7 +12,6 @@
 
 import web3
 import json
-import math
 import requests
 import traceback
 from os import environ
@@ -45,7 +44,6 @@ LILIUM_COMPANY_ADDRESS = networks[NETWORK]["LILIUM_COMPANY_ADDRESS"].lower()
 LOGGER.info(f"HTTP rollup_server url is {ROLLUP_SERVER}, network is {NETWORK} and rollup address is {ROLLUP_ADDRESS}")
 LOGGER.info(f'Lilium company address is {LILIUM_COMPANY_ADDRESS}, EtherPortal address is {ETHER_PORTAL_ADDRESS}, ERC20Portal address is {ERC20_PORTAL_ADDRESS} and ERC721Portal address is {ERC721_PORTAL_ADDRESS}')
 
-
 def new_auction(token_address, amount: int, function_signature, sender, duration: int, reserve_price_per_token: int, timestamp: int) -> None:
     global AUCTION
     global AUCTION_STATE
@@ -75,7 +73,6 @@ def new_auction(token_address, amount: int, function_signature, sender, duration
         LOGGER.info(f"{msg}\n{traceback.format_exc()}")
         REPORT.send({"payload": convert.str2hex(msg)})
         return False
-    
 
 def new_bid(amount: int, function_signature, sender, erc20_interested_amount: int):
     global AUCTION
@@ -132,20 +129,25 @@ def finish_auction(function_signature, timestamp: int):
     
     try:
         vouchers = []
-        selected_bids, unselected_bids, total_ether, token_address, total_amount, sender = AUCTION.finish(timestamp=timestamp)
+        selected_bids, unselected_bids, total_ether, token_address, remaining_erc20_amount, sender = AUCTION.finish(timestamp=timestamp)
 
-        if any(arg is None for arg in [selected_bids, unselected_bids, total_ether, token_address, total_amount, ]):
+        if any(arg is None for arg in [selected_bids, unselected_bids, total_ether, token_address, remaining_erc20_amount, sender ]):
             REPORT.send({"payload": convert.str2hex("None of the arguments can be None in finish auction")})
             raise ValueError("None of the arguments can be None")
         
         for selected_bid, unselected_bid in zip(selected_bids, unselected_bids):
-            total_amount -= math.floor(selected_bid.erc20_interested_amount)
-            voucher_selected = VOUCHER.create_erc20_transfer_voucher(selected_bid.sender, math.floor(selected_bid.erc20_interested_amount), token_address)
-            voucher_unselected = VOUCHER.create_ether_voucher(unselected_bid.sender, math.floor(unselected_bid.ether_amount), ROLLUP_ADDRESS)
-            vouchers.append(voucher_selected, voucher_unselected)
-            
-        vouchers.append(VOUCHER.create_erc20_transfer_voucher(sender, total_amount, token_address))
+            voucher_selected = VOUCHER.create_erc20_transfer_voucher(selected_bid.sender, selected_bid.erc20_interested_amount, token_address)
+            voucher_unselected = VOUCHER.create_ether_voucher(unselected_bid.sender, unselected_bid.ether_amount, ROLLUP_ADDRESS)
+
+            LOGGER.info(f"partially accepted bid from {unselected_bid.sender} with {unselected_bid.ether_amount} wei and {unselected_bid.erc20_interested_amount} tokens")
+            vouchers.append(voucher_selected)
+            vouchers.append(voucher_unselected)
+
         vouchers.append(VOUCHER.create_ether_voucher(sender, total_ether, ROLLUP_ADDRESS))
+
+        if remaining_erc20_amount > 0:
+            vouchers.append(VOUCHER.create_erc20_transfer_voucher(sender, remaining_erc20_amount, token_address))
+
 
         AUCTION_STATE = AuctionState.NOT_HAPPENING
 
@@ -158,6 +160,7 @@ def finish_auction(function_signature, timestamp: int):
         return None, None, None
 
 def handle_advance(data):
+    global ROLLUP_ADDRESS
 
     LOGGER.info(f"Received advance request data {data}")
     try:
