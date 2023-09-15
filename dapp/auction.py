@@ -90,7 +90,7 @@ def new_bid(amount: int, function_signature, sender, erc20_interested_amount: in
         REPORT.send({"payload": convert.str2hex("There is no auction happening in new bid")})
         raise ValueError("There is no auction happening")
     
-    if any(arg <= 0 for arg in [amount, erc20_interested_amount]):
+    if any(arg <= 0 for arg in [amount, sender, erc20_interested_amount]):
         REPORT.send({"payload": convert.str2hex("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")})
         raise ValueError("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")
 
@@ -147,7 +147,6 @@ def finish_auction(function_signature, timestamp: int):
 
         if remaining_erc20_amount > 0:
             vouchers.append(VOUCHER.create_erc20_transfer_voucher(sender, remaining_erc20_amount, token_address))
-
 
         AUCTION_STATE = AuctionState.NOT_HAPPENING
 
