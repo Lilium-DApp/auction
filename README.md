@@ -20,7 +20,7 @@ Please refer to the [rollups examples requirements](https://github.com/cartesi/r
 
 Follow the steps below to build the application:
 
-⚠️ Before building the application, set up the initial contracts from the foundry repository and change the address in auction/dapp/networks.json.
+⚠️ Before building the application, set up the initial contracts from the [foundry repository](https://github.com/Lilium-DApp/foundry) and change the address in auction/dapp/networks.json.
 
 #### **Step 1:** Execute the following commands to build the application 🛠️:
 
@@ -48,7 +48,7 @@ source env.testnet
 docker compose --env-file ./env.testnet -f ./deploy-testnet.yml up
 ```
 
-📝 **Note:** This will create a file at `./deployments/<network>/verifier.json` with the deployed contract's address. Once the command finishes, it is advisable to stop the docker compose and remove the volumes created when executing it.
+📝 **Note:** This will create a file at `./deployments/<network>/verifier.json` with the deployed contract's address. Once the command finishes, it is advisable to stop the docker compose and remove the volumes created when executing it. After this, you need to inform the company contract about the auction dapp address. To do this, go back to the [foundry repository](https://github.com/Lilium-DApp/foundry).
 
 ```shell
 docker compose --env-file ./env.testnet -f ./deploy-testnet.yml down -v
