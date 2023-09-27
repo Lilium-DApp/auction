@@ -69,42 +69,11 @@ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./doc
 💼 **Done!** You now have your Auction DApp ready for testing and experimentation on testnet! 🎉
 
 ## Interacting with the Application 💻
-After setting up the initial contracts as described in the [foundry repository](https://github.com/Lilium-DApp/foundry), proceed with the following commands to interact with the Auction DApp:
+Access the application frontend: [LIVE FRONTEND](https://github.com/Lilium-DApp/foundry)
 
-#### Mint tokens [ Advance State ]:
-```shell
-make mint company="<TOKEN_ADDRESS>" amount=100000 CONFIG="--network sepolia"
-```
+## ⚠️ Disclaimer
 
-#### Create auction [ Advance State ]:
-```shell
-make auction company="<COMPANY_ADDRESS>" amount=10000 duration=1 reserve_price_per_token=100 CONFIG="--network sepolia"
-```
-
-#### Place a bid [ Advance State ]:
-```shell
-make bid company="<COMPANY_ADDRESS>" interested_quantity=9500 value=0.002ether CONFIG="--network sepolia"
-```
-
-#### Finish auction [ Advance State ]:
-⚠️ An auction can only be finalized if the established time for it has passed. When an auction is closed, vouchers are generated for the winners, losers, and for the wallet that started the auction.
-
-```shell
-make finish-auction company="<COMPANY_ADDRESS>"
-```
-
-#### See the Auction state [ Inspect State ]
-
-Enter the frontend console directory:
-```shell
-cd frontend-console
-```
-
-Follow the instructions to build the application. After this, check the auction status with the following command:
-```shell
-yarn start inspect --payload "status"
-```
-
+This repository is in development and not ready for production use. The code and documentation are provided as-is, and may contain bugs or other issues. Please thoroughly test and review the code before considering it for use in a production environment. The maintainers of this repository are not responsible for any issues or damages that may occur from using the code in a production environment.
 
 ## 🌟 Special Thanks
 
