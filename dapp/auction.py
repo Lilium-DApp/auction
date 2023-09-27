@@ -165,7 +165,8 @@ def handle_advance(data):
     try:
         vouchers = []
         payload = data["payload"]
-        unknown_deposit_withdrawal = None
+        unknown_ether_deposit_withdrawal = None
+        unknown_erc20_deposit_withdrawal = None
         binary = convert.hex2binary(payload)
         sender = data["metadata"]["msg_sender"]
         timestamp = data["metadata"]["timestamp"]
@@ -191,16 +192,31 @@ def handle_advance(data):
             NOTICE.send({"payload": convert.str2hex(f"Finish auction")})
                 
         else:
-            decoded_data = input.decode_ether_deposit(binary)
-            unknown_deposit_withdrawal = VOUCHER.create_ether_voucher(decoded_data["sender"], decoded_data["amount"])
-            LOGGER.info(f"Sender {sender} is unknown, creating voucher to withdraw {decoded_data['amount']} wei to {decoded_data['sender']}")
+            try:
+                decoded_data = input.decode_ether_deposit(binary)
+                unknown_ether_deposit_withdrawal = VOUCHER.create_ether_voucher(decoded_data["sender"], decoded_data["amount"])
+                LOGGER.info(f"Sender {sender} is unknown, creating voucher to withdraw {decoded_data['amount']} wei to {decoded_data['sender']}")
+            except:
+                try:
+                    decoded_data = input.decode_erc20_deposit(binary)
+                    unknown_erc20_deposit_withdrawal = VOUCHER.create_erc20_transfer_voucher(decoded_data["sender"], decoded_data["amount"], decoded_data["token_address"])
+                    LOGGER.info(f"Sender {sender} is unknown, creating voucher to withdraw {decoded_data['amount']} tokens to {decoded_data['sender']}")
+                except Exception as e:
+                    msg = f"Error {e} processing data {data}"
+                    LOGGER.error(f"{msg}\n{traceback.format_exc()}")
+                    REPORT.send({"payload": convert.str2hex(msg)})
+                    return "reject"
             
         if vouchers:
             for voucher in vouchers:
                 VOUCHER.send(voucher)
                 
-        elif unknown_deposit_withdrawal:
-            VOUCHER.send(unknown_deposit_withdrawal)
+        if unknown_ether_deposit_withdrawal:
+            VOUCHER.send(unknown_ether_deposit_withdrawal)
+            LOGGER.info(f"Created voucher to withdraw unknown sender to {decoded_data['sender']}")
+
+        if unknown_erc20_deposit_withdrawal:
+            VOUCHER.send(unknown_erc20_deposit_withdrawal)
             LOGGER.info(f"Created voucher to withdraw unknown sender to {decoded_data['sender']}")
         return "accept"
 
@@ -217,7 +233,7 @@ def handle_inspect(data):
     data_decoded = convert.hex2binary(data["payload"]).decode('utf-8')
     try:
         if data_decoded == "status":
-            VOUCHER.send({"payload": convert.str2hex(AUCTION_STATE.name)})
+            REPORT.send({"payload": convert.str2hex(f'The Auction dApp state is {AUCTION_STATE.name} and the number of bids is {len(AUCTION.bids)}')})
             return "accept"
         else:
             raise Exception(
