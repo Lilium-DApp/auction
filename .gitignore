@@ -128,5 +128,4 @@ dmypy.json
 .pyre/
 
 # Other
-deployments/
 env.testnet

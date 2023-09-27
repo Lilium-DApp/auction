@@ -39,10 +39,10 @@ DAPP_RELAY_ADDRESS = networks[NETWORK]["DAPP_RELAY_ADDRESS"].lower()
 ETHER_PORTAL_ADDRESS = networks[NETWORK]["ETHER_PORTAL_ADDRESS"].lower()
 ERC20_PORTAL_ADDRESS = networks[NETWORK]["ERC20_PORTAL_ADDRESS"].lower()
 ERC721_PORTAL_ADDRESS = networks[NETWORK]["ERC721_PORTAL_ADDRESS"].lower()
-LILIUM_COMPANY_ADDRESS = networks[NETWORK]["LILIUM_COMPANY_ADDRESS"].lower()
+FOREST_RESERVE_ADDRESS = networks[NETWORK]["FOREST_RESERVE_ADDRESS"].lower()
 
 LOGGER.info(f"HTTP rollup_server url is {ROLLUP_SERVER}, network is {NETWORK} and rollup address is {ROLLUP_ADDRESS}")
-LOGGER.info(f'Lilium company address is {LILIUM_COMPANY_ADDRESS}, EtherPortal address is {ETHER_PORTAL_ADDRESS}, ERC20Portal address is {ERC20_PORTAL_ADDRESS} and ERC721Portal address is {ERC721_PORTAL_ADDRESS}')
+LOGGER.info(f'Forest Reserve address is {FOREST_RESERVE_ADDRESS}, EtherPortal address is {ETHER_PORTAL_ADDRESS}, ERC20Portal address is {ERC20_PORTAL_ADDRESS} and ERC721Portal address is {ERC721_PORTAL_ADDRESS}')
 
 def new_auction(token_address, amount: int, function_signature, sender, duration: int, reserve_price_per_token: int, timestamp: int) -> None:
     global AUCTION
@@ -90,7 +90,7 @@ def new_bid(amount: int, function_signature, sender, erc20_interested_amount: in
         REPORT.send({"payload": convert.str2hex("There is no auction happening in new bid")})
         raise ValueError("There is no auction happening")
     
-    if any(arg <= 0 for arg in [amount, sender, erc20_interested_amount]):
+    if any(arg <= 0 for arg in [amount, erc20_interested_amount]):
         REPORT.send({"payload": convert.str2hex("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")})
         raise ValueError("Invalid arguments: Amount of Ether and ERC20 interested amount must be greater than 0")
 
@@ -186,7 +186,7 @@ def handle_advance(data):
             if new_auction(token_address=decoded_data["token_address"], amount=decoded_data["amount"], function_signature=decoded_data["function_signature"], sender=decoded_data["sender"], duration=decoded_data["duration"], reserve_price_per_token=decoded_data["reserve_price_per_token"], timestamp=timestamp):
                 NOTICE.send({"payload": convert.str2hex(f"New auction from {decoded_data['sender']}")})
         
-        elif data["metadata"]["msg_sender"] == LILIUM_COMPANY_ADDRESS:
+        elif data["metadata"]["msg_sender"] == FOREST_RESERVE_ADDRESS:
             decoded_data = input.decode_finish_auction(binary)
             vouchers = finish_auction(decoded_data["function_signature"], timestamp)
             NOTICE.send({"payload": convert.str2hex(f"Finish auction")})
@@ -227,13 +227,15 @@ def handle_advance(data):
         return "reject"
 
 def handle_inspect(data):
+    global AUCTION
     global AUCTION_STATE
 
     LOGGER.info(f"Received inspect request data {data}")
     data_decoded = convert.hex2binary(data["payload"]).decode('utf-8')
     try:
         if data_decoded == "status":
-            REPORT.send({"payload": convert.str2hex(f'The Auction dApp state is {AUCTION_STATE.name} and the number of bids is {len(AUCTION.bids)}')})
+            num_bids = 0 if AUCTION is None or AUCTION.bids is None else len(AUCTION.bids)
+            REPORT.send({"payload": convert.str2hex(f'The Auction dApp state is {AUCTION_STATE.name} and the number of bids is {num_bids}')})
             return "accept"
         else:
             raise Exception(
