@@ -67,9 +67,6 @@ $ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./d
 💼 **Done!** You now have your Auction DApp ready for testing and experimentation on testnet! 🎉
 
 ## Interacting with the Application 💻
-Access the application frontend: [LIVE FRONTEND](https://github.com/Lilium-DApp/foundry)
-
-## Interacting with the Application 💻
 
 Access the application frontend 🌐: 
 
