@@ -67,7 +67,7 @@ $ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./d
 ## Interacting with the Application 💻
 Access the application frontend: [LIVE FRONTEND](https://github.com/Lilium-DApp/foundry)
 
-## 🚀 Running an application node:
+## 🚀 Running a node from an already deployed DApp:
 
 ```bash
 $ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./docker-compose.override-sepolia.yml up
