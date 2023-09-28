@@ -67,15 +67,15 @@ $ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./d
 ## Interacting with the Application 💻
 Access the application frontend: [LIVE FRONTEND](https://github.com/Lilium-DApp/foundry)
 
-## 🚀 Running a node from an already deployed DApp:
+## Interacting with the Application 💻
 
-```bash
-$ docker compose --env-file ./env.testnet -f ./docker-compose-testnet.yml -f ./docker-compose.override-sepolia.yml up
-```
+Access the application frontend 🌐: 
+
+### [***Lilium WEBAPP***](https://frontend-orcin-psi.vercel.app/)
 
 ## ⚠️ Disclaimer
 
-This repository is in development and not ready for production use. The code and documentation are provided as-is, and may contain bugs or other issues. Please thoroughly test and review the code before considering it for use in a production environment. The maintainers of this repository are not responsible for any issues or damages that may occur from using the code in a production environment.
+***This repository is in development and not ready for production use. The code and documentation are provided as-is, and may contain bugs or other issues. Please thoroughly test and review the code before considering it for use in a production environment. The maintainers of this repository are not responsible for any issues or damages that may occur from using the code in a production environment.***
 
 ## 🌟 Special Thanks
 
