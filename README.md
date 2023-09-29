@@ -20,8 +20,6 @@ Please refer to the [rollups examples requirements](https://github.com/cartesi/r
 
 Follow the steps below to build the application:
 
-⚠️ Before building the application, set up the initial contracts from the [foundry repository](https://github.com/Lilium-DApp/foundry) and change the address in auction/dapp/networks.json.
-
 #### **Step 1:** Execute the following commands to build the application 🛠️:
 
 ***⚠️ If you are using a shell like bash, please run the commands below without the quotes in ```"*.args.NETWORK=<TESTNET_NAME>"```***
